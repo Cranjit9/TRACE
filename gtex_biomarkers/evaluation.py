@@ -144,7 +144,7 @@ def plot_boxplot_grid(results_dict, suptitle="", save_path=None, ncols=4):
 
 def plot_ranked_barplot(summary_df, auc_cutoff=None, save_path=None):
     """Horizontal bar chart ranking all models by mean AUC."""
-    auc_cutoff = auc_cutoff or Config.AUC_CUTOFF
+    auc_cutoff = auc_cutoff or Config.AUC_THRESH
     s = summary_df.sort_values("mean_auc", ascending=True).copy()
     s["label"] = s["tissue"] + " | " + s["category"]
     colors = ["#2ecc71" if v >= auc_cutoff else "#95a5a6" for v in s["mean_auc"]]
@@ -226,8 +226,8 @@ def plot_comparison_scatter(comp_df, save_path=None):
     ax.scatter(comp_df["mean_auc_lr"], comp_df["mean_auc_rf"],
                s=40, alpha=0.7, edgecolors="black", lw=0.5)
     ax.plot([0.3, 1], [0.3, 1], ls="--", color="grey", lw=1, label="Equal performance")
-    ax.axhline(0.65, ls=":", color="red", lw=0.8, alpha=0.5)
-    ax.axvline(0.65, ls=":", color="red", lw=0.8, alpha=0.5)
+    ax.axhline(Config.AUC_THRESH, ls=":", color="red", lw=0.8, alpha=0.5)
+    ax.axvline(Config.AUC_THRESH, ls=":", color="red", lw=0.8, alpha=0.5)
 
     top = comp_df.nlargest(5, "auc_diff")
     for _, row in top.iterrows():

@@ -119,8 +119,25 @@ def extract_categories(notes_text, compiled_patterns=None):
     return sorted(matched)
 
 
+# Column with structured-or-NLP-imputed labels. Added to df_meta_url by
+# gtex_biomarkers.data.load_raw_data(). Falls back to the raw structured column
+# if the imputed column is absent (older cached data).
+_LABEL_COL = "Pathology.Categories.Final"
+_LABEL_COL_FALLBACK = "Pathology.Categories"
+
+
+def _pick_label_col(df):
+    if _LABEL_COL in df.columns:
+        return _LABEL_COL
+    return _LABEL_COL_FALLBACK
+
+
 def assign_donor_labels(df_meta_url, tissue, category, blood_subjid):
     """Assign binary donor-level labels for a tissue × category pair.
+
+    Reads from `Pathology.Categories.Final` (structured GTEx label when present,
+    NLP-imputed otherwise). Falls back to `Pathology.Categories` if the imputed
+    column is missing.
 
     Returns
     -------
@@ -128,14 +145,15 @@ def assign_donor_labels(df_meta_url, tissue, category, blood_subjid):
     donor_lab : Series — donor SUBJID → 0/1
     n_pos, n_neg : int — counts of positive/negative blood samples
     """
+    label_col = _pick_label_col(df_meta_url)
     tissue_sub = df_meta_url[df_meta_url["Tissue"] == tissue].copy()
     tissue_sub["SUBJID"] = (
         tissue_sub["Tissue.Sample.ID"].astype(str)
         .str.split("-").str[:2].str.join("-")
     )
 
-    known = tissue_sub[tissue_sub["Pathology.Categories"].notna()].copy()
-    has_cat = known["Pathology.Categories"].str.contains(
+    known = tissue_sub[tissue_sub[label_col].notna()].copy()
+    has_cat = known[label_col].str.contains(
         category, case=False
     ).astype(int)
     donor_lab = has_cat.groupby(known["SUBJID"]).max()
@@ -152,7 +170,8 @@ def assign_donor_labels(df_meta_url, tissue, category, blood_subjid):
 def discover_tissue_category_pairs(df_meta_url, threshold=None):
     """Find all tissue × category pairs with ≥ threshold positive samples.
 
-    Excludes normal labels (clean_specimens, no_abnormalities).
+    Reads from `Pathology.Categories.Final` (imputed). Excludes normal labels
+    (clean_specimens, no_abnormalities).
 
     Returns
     -------
@@ -160,12 +179,13 @@ def discover_tissue_category_pairs(df_meta_url, threshold=None):
     """
     threshold = threshold or Config.ALL_TISSUE_THRESHOLD
     exclude = {x.lower() for x in Config.NORMAL_LABELS}
+    label_col = _pick_label_col(df_meta_url)
     pairs = []
 
     for tissue in sorted(df_meta_url["Tissue"].dropna().unique()):
         sub = df_meta_url[df_meta_url["Tissue"] == tissue]
         cat_counts = Counter()
-        for val in sub["Pathology.Categories"].dropna():
+        for val in sub[label_col].dropna():
             for c in val.split(", "):
                 cat_counts[c.strip()] += 1
         for cat, n in sorted(cat_counts.items(), key=lambda x: -x[1]):

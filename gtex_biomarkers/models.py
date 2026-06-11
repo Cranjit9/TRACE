@@ -16,13 +16,18 @@ from gtex_biomarkers.config import Config
 def _auc_feature_selection(Xtr, ytr, top_k=None):
     """Per-gene AUC-based feature selection on training data only.
 
-    For each gene, compute |AUC - 0.5| against the binary label.
+    For each gene, compute |AUC - 0.5| against the binary label. Missing values
+    are imputed with the train-fold median per column (never with 0, never with
+    test-fold information).
+
     Return the top_k gene column names.
     """
     top_k = top_k or Config.TOP_K_FEATURES
     strengths = {}
     for col in Xtr.columns:
-        s = pd.to_numeric(Xtr[col], errors="coerce").fillna(0)
+        s = pd.to_numeric(Xtr[col], errors="coerce")
+        med = s.median()
+        s = s.fillna(med if pd.notna(med) else 0.0)
         if s.nunique() < 2:
             strengths[col] = 0.0
             continue
@@ -30,6 +35,17 @@ def _auc_feature_selection(Xtr, ytr, top_k=None):
         strengths[col] = abs(a - 0.5)
     scores = pd.Series(strengths).reindex(Xtr.columns).fillna(0)
     return scores.nlargest(top_k).index.tolist()
+
+
+def _impute_train_fold(Xtr, Xte):
+    """Median-impute Xtr (using train-fold medians) and apply same medians to Xte.
+
+    Preserves DataFrame index/columns. Columns where train-fold median is NaN
+    (all-NaN in train) fall back to 0.
+    """
+    med = Xtr.median(numeric_only=True)
+    med = med.where(med.notna(), 0.0)
+    return Xtr.fillna(med), Xte.fillna(med)
 
 
 def make_lr_pipeline(cfg=None):
@@ -72,19 +88,19 @@ def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
 
     Unified CV function supporting three modes:
     - feature_selection=True, X_extra=None  → AUC-based FS on X (expression only)
-    - feature_selection=False, X_extra=None → no FS, use all columns (e.g. confounders)
+    - feature_selection=False, X_extra=None → no FS, use all columns (e.g. clinical co-variates)
     - feature_selection=True, X_extra=df    → AUC-based FS on X, concat X_extra always
 
     Parameters
     ----------
-    X : DataFrame — (samples × genes) or (samples × confounders)
+    X : DataFrame — (samples × genes) or (samples × clinical co-variates)
     y : Series — binary labels (0/1)
     groups : Series — donor SUBJID for grouping
     model_factory : callable — returns a fresh model/pipeline per fold
     cfg : Config class
     top_k : int — number of features to select per fold
     save_features : bool — if True, capture selected genes + RF importances
-    X_extra : DataFrame — extra columns always included (e.g. confounders)
+    X_extra : DataFrame — extra columns always included (e.g. clinical co-variates)
     feature_selection : bool — whether to run AUC-based feature selection
 
     Returns
@@ -124,6 +140,10 @@ def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
             Xtr_extra, Xte_extra = X_extra.iloc[tr], X_extra.iloc[te]
             Xtr_fit = pd.concat([Xtr_fit, Xtr_extra], axis=1)
             Xte_fit = pd.concat([Xte_fit, Xte_extra], axis=1)
+
+        # Per-fold median imputation — train-fold medians applied to both
+        # train and test, so no test-fold information leaks into imputation.
+        Xtr_fit, Xte_fit = _impute_train_fold(Xtr_fit, Xte_fit)
 
         # Train + predict
         model = model_factory()
@@ -167,12 +187,12 @@ def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
 
 # Backwards-compatible aliases
 def run_cv_no_fs(X, y, groups, model_factory, cfg=None):
-    """Run CV without feature selection (for low-dimensional inputs like confounders)."""
+    """Run CV without feature selection (for low-dimensional inputs like clinical co-variates)."""
     return run_cv(X, y, groups, model_factory, cfg=cfg, feature_selection=False)
 
 
 def run_cv_combined(X_expr, X_conf, y, groups, model_factory, cfg=None, top_k=None):
-    """Run CV with AUC FS on expression, always including confounders."""
+    """Run CV with AUC FS on expression, always including clinical co-variates."""
     return run_cv(X_expr, y, groups, model_factory, cfg=cfg, top_k=top_k,
                   X_extra=X_conf)
 
@@ -213,7 +233,7 @@ def run_tissue_models(tissue, cat_list, df_meta_url, blood_subjid, X_wb,
 
 def run_tissue_confounder_models(tissue, cat_list, df_meta_url, blood_subjid,
                                  X_wb, X_conf, model_factory, cfg=None):
-    """Run confounder-only AND expression+confounder models for one tissue.
+    """Run clinical co-variate-only AND expression+clinical co-variate models for one tissue.
 
     Returns two lists: (conf_results, combined_results), each a list of
     (tag, result_dict) tuples.
@@ -239,14 +259,14 @@ def run_tissue_confounder_models(tissue, cat_list, df_meta_url, blood_subjid,
         if n_pos < cfg.MIN_POS_NEG_BLOOD or n_neg < cfg.MIN_POS_NEG_BLOOD:
             continue
 
-        # Model A: confounders only (no feature selection)
+        # Model A: clinical co-variates only (no feature selection)
         res_c = run_cv(X_conf_cat, y_cat, g_cat, model_factory, cfg=cfg,
                        feature_selection=False)
         res_c["tissue"] = tissue
         res_c["category"] = cat
         conf_results.append((tag, res_c))
 
-        # Model B: expression + confounders (AUC FS on expression, confounders always kept)
+        # Model B: expression + clinical co-variates (AUC FS on expression, clinical co-variates always kept)
         res_cb = run_cv(X_expr_cat, y_cat, g_cat, model_factory, cfg=cfg,
                         X_extra=X_conf_cat)
         res_cb["tissue"] = tissue

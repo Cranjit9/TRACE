@@ -12,19 +12,45 @@ from gtex_biomarkers.config import Config
 def load_raw_data(cfg=None):
     """Load the four input files and return them as DataFrames.
 
+    `df_meta_url` is augmented with a `Pathology.Categories.Final` column that
+    combines GTEx's structured `Pathology.Categories` field with NLP-imputed
+    labels extracted from `Pathology.Notes` by `gtex_biomarkers.labels_v2`.
+    Downstream label functions read `Pathology.Categories.Final` by default,
+    so every model uses the imputed labels transparently.
+
+    The merged file lives at `data/processed/meta_data_with_url_imputed.csv`,
+    produced by notebook 03. If that file is missing (e.g. on a fresh clone),
+    we fall back to computing the imputation on the fly so notebooks still work
+    without first executing NB03.
+
     Returns
     -------
     df_expr : DataFrame  — gene TPM expression (genes x samples)
     df_samples : DataFrame — sample-level metadata
     df_age : DataFrame — donor-level restricted data (AGE, SEX, …)
-    df_meta_url : DataFrame — pathology metadata with tissue info
+    df_meta_url : DataFrame — pathology metadata with tissue info, including
+                              `Pathology.Categories.Final`
     """
     cfg = cfg or Config
 
     df_expr = pd.read_csv(cfg.EXPR_FILE, sep="\t", skiprows=2)
     df_samples = pd.read_csv(cfg.META_FILE, sep="\t")
     df_age = pd.read_csv(cfg.AGE_FILE, sep="\t")
-    df_meta_url = pd.read_csv(cfg.PATHOLOGY_FILE)
+
+    imputed_path = cfg.PROCESSED_DIR / "meta_data_with_url_imputed.csv"
+    if imputed_path.exists():
+        df_meta_url = pd.read_csv(imputed_path)
+    else:
+        # Fallback: read raw meta and compute imputed labels in-process.
+        from gtex_biomarkers.labels_v2 import extract_categories_v2
+        df_meta_url = pd.read_csv(cfg.PATHOLOGY_FILE)
+        nlp_pred = df_meta_url["Pathology.Notes"].apply(
+            lambda n: ", ".join(sorted(c for c, _ in extract_categories_v2(n)))
+            or None
+        )
+        df_meta_url["Pathology.Categories.Final"] = (
+            df_meta_url["Pathology.Categories"].fillna(nlp_pred)
+        )
 
     return df_expr, df_samples, df_age, df_meta_url
 
@@ -86,10 +112,12 @@ CONFOUNDER_COLS = ["SEX", "AGE", "RACE", "DTHHRDY", "TRISCHD"]
 
 
 def build_confounder_matrix(df_age, blood_subjid):
-    """Build donor-level confounder matrix aligned to blood samples.
+    """Build donor-level clinical co-variate matrix aligned to blood samples.
 
     Features: SEX, AGE, RACE, DTHHRDY (Hardy Scale), TRISCHD (ischemic time).
-    RACE codes 98/99 are treated as missing.  All NaNs imputed with column median.
+    RACE codes 98/99 are treated as missing.  NaNs are left in place — median
+    imputation is applied within each train fold by `run_cv` to avoid
+    train/test leakage.
 
     Parameters
     ----------
@@ -98,7 +126,8 @@ def build_confounder_matrix(df_age, blood_subjid):
 
     Returns
     -------
-    X_conf : DataFrame — shape (n_blood_samples, n_confounders), index = SAMPID
+    X_conf : DataFrame — shape (n_blood_samples, n_confounders), index = SAMPID,
+             with NaN entries preserved for per-fold imputation downstream.
     """
     conf = df_age.drop_duplicates("SUBJID").set_index("SUBJID")
     cols = [c for c in CONFOUNDER_COLS if c in conf.columns]
@@ -113,10 +142,7 @@ def build_confounder_matrix(df_age, blood_subjid):
     for col in cols:
         X_conf[col] = blood_subjid.map(conf[col])
 
-    # Impute missing with column median
     X_conf = X_conf.astype(float)
-    X_conf = X_conf.fillna(X_conf.median())
-
     return X_conf
 
 

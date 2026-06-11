@@ -69,13 +69,13 @@ def _make_summary(results_dict):
 def run_all_confounder_models_parallel(pairs_df, df_meta_url, blood_subjid,
                                        X_wb, X_conf, model_factory,
                                        cfg=None, n_jobs=-1):
-    """Run confounder-only AND expression+confounder RF models, parallelized by tissue.
+    """Run clinical co-variate-only AND expression+clinical co-variate RF models, parallelized by tissue.
 
     Returns
     -------
-    conf_results : dict — {tag: result_dict} for confounder-only models
+    conf_results : dict — {tag: result_dict} for clinical co-variate-only models
     conf_summary : DataFrame
-    comb_results : dict — {tag: result_dict} for expression+confounder models
+    comb_results : dict — {tag: result_dict} for expression+clinical co-variate models
     comb_summary : DataFrame
     """
     cfg = cfg or Config
@@ -127,7 +127,7 @@ def top_models_table(summary_df, results_dict, auc_cutoff=None):
     -------
     top_df : DataFrame — with n_blood_samples, n_positive, prevalence columns
     """
-    auc_cutoff = auc_cutoff or Config.AUC_CUTOFF
+    auc_cutoff = auc_cutoff or Config.AUC_THRESH
     top = summary_df[summary_df["mean_auc"] >= auc_cutoff].copy()
     top = top.sort_values("mean_auc", ascending=False).reset_index(drop=True)
 

@@ -40,9 +40,8 @@ class Config:
     RF_MAX_FEATURES = "sqrt"
 
     # ── Evaluation ────────────────────────────────────────────────────────────
-    AUC_CUTOFF = 0.65
-    AUC_THRESH = 0.65      # quadrant: expression AUC threshold
-    DELTA_THRESH = 0.05    # quadrant: delta (expr gain over confounders) threshold
+    AUC_THRESH = 0.60      # qualifying gate: PC+co-variates expression AUC
+    DELTA_THRESH = 0.05    # qualifying gate: delta (expr gain over clinical co-variates)
 
     # ── Labels to exclude (normal / healthy) ──────────────────────────────────
     NORMAL_LABELS = {"clean_specimens", "no_abnormalities"}
