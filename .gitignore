@@ -49,7 +49,16 @@ output/
 reports/
 figures/
 tables/
-scripts/
+
+# Scripts: ignore the scratch dir by default but track the canonical runner.
+scripts/*
+!scripts/run_all_nbs.sh
+
+# Python build artifacts
+*.egg-info/
+
+# Pipeline run logs
+notebooks/_runlogs/
 
 # -------------------------
 # Models / artifacts
