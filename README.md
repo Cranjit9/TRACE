@@ -77,10 +77,7 @@ notebooks/
 ├── 13_organ_enrichment.ipynb           # ST5 organ + FDA biomarkers, two-layer scorecard
 ├── 14_ukbpp_validation.ipynb           # UK Biobank pQTL Mendelian randomization
 ├── 15_liver_tissue_validation.ipynb    # Independent liver tissue cross-check
-├── 16_multipanel_figures.ipynb         # Main manuscript figures
-├── 17_supp_methodology.ipynb           # Supplementary methodology figures
-├── 18_supplementary_doc.ipynb          # Builds `manuscript/supplementary.docx`
-└── 19_all_results_dump.ipynb           # Dumps every CSV to `output/tables/all_results.txt`
+└── 16_multipanel_figures.ipynb         # Main manuscript figures
 ```
 
 Shared code lives in `gtex_biomarkers/` (data loading, models, evaluation, figure builders).
@@ -103,7 +100,7 @@ gtex_gene_expression/
 │   ├── evaluation.py              # ROC, PR, CM, boxplot, summary plots
 │   ├── figure_builder.py          # Multipanel manuscript figures
 │   └── utils.py                   # Parallel runners, comparison tables
-├── notebooks/                     # Analysis notebooks (NB01-NB19)
+├── notebooks/                     # Analysis notebooks (NB01-NB16)
 ├── scripts/
 │   └── run_all_nbs.sh             # End-to-end pipeline runner
 ├── manuscript/                    # Main + supplementary docx
