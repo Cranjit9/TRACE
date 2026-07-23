@@ -37,7 +37,7 @@ conda env create -f env.yaml && conda activate gtex_biomarkers
 # or: pip install -r requirements.txt
 ```
 
-`requirements-lock.txt` pins every transitive dependency (124 packages) at the versions used to generate the manuscript results. `requirements.txt` carries floors only and is kept for downstream packaging.
+`requirements-lock.txt` pins every transitive dependency (126 packages) at the versions used to generate the manuscript results. `requirements.txt` carries floors only and is kept for downstream packaging.
 
 ## Data
 
@@ -80,6 +80,28 @@ notebooks/
 └── 16_multipanel_figures.ipynb         # Main manuscript figures
 ```
 
+### Reproducible clean run
+
+The canonical runner executes notebooks into `output/executed_notebooks/`,
+keeps one log per notebook in `_runlogs/`, and then rebuilds the approved
+figure exports. It does not edit notebooks in place and does not require
+machine-specific paths or `sudo`:
+
+```bash
+./scripts/run_all_nbs.sh
+```
+
+The final-figure step can also be run by itself:
+
+```bash
+.venv/bin/python scripts/render_final_figures.py
+.venv/bin/python scripts/verify_final_figures.py
+```
+
+`data/figure_sources/` contains the small, frozen PDF source bundle used by
+the final renderer. Large GTEx inputs remain ignored; exploratory scripts and
+notebooks are not silently deleted or changed by the clean renderer.
+
 Shared code lives in `gtex_biomarkers/` (data loading, models, evaluation, figure builders).
 
 ## Project Structure
@@ -102,11 +124,15 @@ gtex_gene_expression/
 │   └── utils.py                   # Parallel runners, comparison tables
 ├── notebooks/                     # Analysis notebooks (NB01-NB16)
 ├── scripts/
-│   └── run_all_nbs.sh             # End-to-end pipeline runner
+│   ├── run_all_nbs.sh             # End-to-end pipeline runner
+│   ├── render_final_figures.py     # Rebuild approved final exports
+│   ├── verify_final_figures.py     # Validate expected PDFs and panels
+│   └── figures/                    # Vector Figure 4 compositor
 ├── manuscript/                    # Main + supplementary docx
-├── data/                          # Not tracked in git
+├── data/                          # Large inputs ignored; figure sources tracked
 │   ├── raw/                       # GTEx downloads
-│   └── processed/                 # Imputed labels
+│   ├── processed/                 # Imputed labels
+│   └── figure_sources/            # Small frozen final-figure PDF sources
 └── output/                        # Not tracked in git
     ├── figures/                   # PNG plots
     └── tables/                    # CSV results

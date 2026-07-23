@@ -78,6 +78,7 @@ pillow==12.2.0
 platformdirs==4.10.0
 prometheus_client==0.25.0
 prompt_toolkit==3.0.52
+pymupdf==1.28.0
 psutil==7.2.2
 ptyprocess==0.7.0
 pure_eval==0.2.3
