@@ -39,7 +39,6 @@ NOTEBOOKS=(
   13_organ_enrichment
   14_ukbpp_validation
   15_liver_tissue_validation
-  16_multipanel_figures
   17_main_figures
   18_supplementary
 )

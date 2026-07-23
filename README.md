@@ -40,9 +40,8 @@ Place the following GTEx v10 files in `data/raw/`:
 | 04–09 | Binary + multi-category classifiers, LR/RF baselines, confounder analysis |
 | 10–12 | PC + covariate screen, gene back-projection, pathway enrichment |
 | 13–15 | Cross-organ plasma enrichment, UKB-PPP Mendelian randomization, liver tissue check |
-| 16 | Early multipanel figures (pre-approval) |
 | 17 | Main manuscript figures 1–4 |
-| 18 | Supplementary figures S1–S6 + `supplementary.docx` |
+| 18 | Supplementary figures S1–S6 |
 
 Parameters and thresholds are consolidated in `gtex_biomarkers/config.py`.
 
