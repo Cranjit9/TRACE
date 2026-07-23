@@ -82,85 +82,6 @@ DASH_GREY  = "#8A8A8A"
 BRANCH_GREY = "#5F5F5F"
 BAND_GREY  = "#F3F3F3"
 
-def panel_fig2A(fig, ax, pair_bal):
-    """Panel A: 59-pair pathology counts (stacked bar, banded tissue blocks)."""
-    tissue_totals = (pair_bal.groupby("tissue")["n_total"]
-                     .max().sort_values(ascending=False))
-    tissue_order = tissue_totals.index.tolist()
-    ordered = pd.concat(
-        [pair_bal[pair_bal["tissue"] == t].sort_values("n_pos", ascending=False)
-         for t in tissue_order],
-        ignore_index=True,
-    )
-
-    y = []
-    block_edges = []
-    cur = 0.0
-    INTRA_GAP = 1.0
-    INTER_GAP = 2.6
-    for t in tissue_order:
-        sub = ordered[ordered["tissue"] == t]
-        ys = [cur + i * INTRA_GAP for i in range(len(sub))]
-        y.extend(ys)
-        block_edges.append(((ys[0] + ys[-1]) / 2, t, ys[0] - 0.55, ys[-1] + 0.55))
-        cur = ys[-1] + INTER_GAP
-    y = np.array(y)
-
-    X_MAX      = ordered["n_total"].max() * 1.08
-    X_TISSUE   = -320
-    X_PATHNAME = -120
-    X_BRACKET  = -108
-    X_PADDING  = -175
-    X_POSCT    = -8
-
-    for k, (center, tissue, y0, y1) in enumerate(block_edges):
-        if k % 2 == 1:
-            ax.axhspan(y0, y1,
-                       xmin=(X_PADDING - (X_TISSUE - 40)) / (X_MAX - (X_TISSUE - 40)),
-                       xmax=1.0, color=BAND_GREY, zorder=0)
-        ax.plot([X_BRACKET, X_BRACKET], [y0 + 0.05, y1 - 0.05],
-                color=BRANCH_GREY, linewidth=1.5, zorder=2.5, clip_on=False)
-        tissue_rows = y[(y >= y0) & (y <= y1)]
-        for yi_branch in tissue_rows:
-            ax.plot([X_BRACKET - 7, X_BRACKET], [yi_branch, yi_branch],
-                    color=BRANCH_GREY, linewidth=1.2, zorder=2.5, clip_on=False)
-        ax.text(X_TISSUE, center, tissue_display(tissue), fontsize=7.5,
-                ha="left", va="center", color=INK, fontweight="bold",
-                clip_on=False)
-
-    ax.barh(y, ordered["n_pos"], color=BAR_BLUE, edgecolor="none",
-            height=0.75, label="Positive (has pathology)")
-    ax.barh(y, ordered["n_neg"], left=ordered["n_pos"], color=BAR_GOLD,
-            edgecolor="none", height=0.75, label="Negative")
-
-    ax.set_yticks(y)
-    ax.set_yticklabels([""] * len(y))
-    for yi, (_, r) in zip(y, ordered.iterrows()):
-        ax.text(X_PATHNAME, yi,
-                str(r.pathology).replace("_", " ").capitalize(),
-                ha="right", va="center", fontsize=7.0, color=INK, clip_on=False)
-        ax.text(X_POSCT, yi, f"{int(r.n_pos)}",
-                ha="right", va="center", fontsize=6.5, color="#555", clip_on=False)
-        ax.text(r.n_pos + r.n_neg + 6, yi, f"{int(r.n_neg)}",
-                ha="left", va="center", fontsize=6.5, color="#555")
-
-    ax.set_xlabel("Number of donors", fontsize=8)
-    ax.set_xticks([0, 100, 200, 300, 400, 500, 600])
-    ax.set_xlim(X_TISSUE - 40, X_MAX)
-    ax.set_ylim(y.max() + 1.5, y.min() - 2.0)
-
-    ax.axvline(0, color=BRANCH_GREY, linewidth=1.0, zorder=1.5)
-    for xt in [100, 200, 300, 400, 500, 600]:
-        ax.axvline(xt, color=DASH_GREY, linestyle=(0, (4, 3)),
-                   linewidth=0.7, alpha=0.55, zorder=0.5)
-
-    ax.legend(loc="lower center", bbox_to_anchor=(0.68, 1.005),
-              ncol=2, fontsize=9, frameon=False, handlelength=1.5,
-              columnspacing=2.5, handleheight=1.1)
-    hs_axes(ax, spines=("bottom",))
-    ax.tick_params(axis="y", length=0)
-    ax.tick_params(axis="x", direction="out", length=2.5, width=0.5, colors=INK)
-
 COV_SPECS_2B = [
     ("TRISCHD", "Ischemic time", "viridis", False),
     ("AGE",     "Age",           "viridis", False),
@@ -172,6 +93,7 @@ COV_SPECS_2B = [
 # GTEx v10 phenotype code → human-readable label (dbGaP data dictionary).
 SEX_LABELS_2B = {1: "Male", 2: "Female"}
 RACE_LABELS_2B = {1: "Asian", 2: "Black", 3: "White", 4: "AI/AN"}
+
 
 def panel_fig2B(fig, gs_slot, donor_scores, pca_var):
     """Panel B: 5-panel PC1 x PC2 covariate scatters (Jul-10 design)."""
@@ -267,26 +189,6 @@ def panel_fig2C(fig, ax, cov_aucs, pc_keep_mask):
     ax.tick_params(axis="y", length=0)
     ax.tick_params(axis="x", length=1.5, width=0.4)
 
-def build_figure_2():
-    """Composite Figure 2 = A / B / C stacked."""
-    d = load_fig2_data()
-    cov_aucs, pc_keep_mask = compute_fig2C_covariate_auc_matrix(50)
-
-    fig = plt.figure(figsize=(9.5, 15.5))
-    outer = GridSpec(3, 1, figure=fig,
-                     height_ratios=[3.2, 1.0, 0.9],
-                     hspace=0.32, left=0.13, right=0.97, top=0.98, bottom=0.03)
-    axA = fig.add_subplot(outer[0])
-    panel_fig2A(fig, axA, d["pair_bal"])
-    hs_panel_letter(fig, axA, "A", dx=-0.06, dy=0.005, fontsize=14)
-
-    axesB = panel_fig2B(fig, outer[1], d["donor_scores"], d["pca_var"])
-    hs_panel_letter(fig, axesB[0], "B", dx=-0.05, dy=0.01, fontsize=14)
-
-    axC = fig.add_subplot(outer[2])
-    panel_fig2C(fig, axC, cov_aucs, pc_keep_mask)
-    hs_panel_letter(fig, axC, "C", dx=-0.06, dy=0.02, fontsize=14)
-    return fig
 
 def load_fig3_data():
     return {
@@ -647,38 +549,6 @@ def panel_fig3F(fig, ax, gsea, k_top=20):
         fontsize=6.5, color=INK, clip_on=False,
     )
 
-def build_figure_3():
-    d = load_fig3_data()
-    plt.close("all")
-    fig = plt.figure(figsize=(15.5, 10.8))
-    outer = GridSpec(2, 3, figure=fig,
-                     height_ratios=[1.0, 1.12],
-                     hspace=0.42, wspace=0.42,
-                     left=0.055, right=0.97, top=0.96, bottom=0.07)
-    axA = fig.add_subplot(outer[0, 0])
-    panel_fig3A(fig, axA, d["pc_univar"])
-    hs_panel_letter(fig, axA, "A", dx=-0.06, dy=0.01, fontsize=13)
-
-    axB = fig.add_subplot(outer[0, 1])
-    panel_fig3B(fig, axB, d["six_mat_mean"])
-    hs_panel_letter(fig, axB, "B", dx=-0.06, dy=0.01, fontsize=13)
-
-    axC = fig.add_subplot(outer[0, 2])
-    panel_fig3C(fig, axC, d["pc_results"])
-    hs_panel_letter(fig, axC, "C", dx=-0.06, dy=0.01, fontsize=13)
-
-    axD = fig.add_subplot(outer[1, 0])
-    panel_fig3D(fig, axD, d["pc_rf_gini"])
-    hs_panel_letter(fig, axD, "D", dx=-0.06, dy=0.01, fontsize=13)
-
-    axE = fig.add_subplot(outer[1, 1])
-    panel_fig3E(fig, axE, d["gene_imp"])
-    hs_panel_letter(fig, axE, "E", dx=-0.06, dy=0.01, fontsize=13)
-
-    axF = fig.add_subplot(outer[1, 2])
-    panel_fig3F(fig, axF, d["gsea"])
-    hs_panel_letter(fig, axF, "F", dx=-0.08, dy=0.01, fontsize=13)
-    return fig
 
 PHEN_ORDER_SEVERITY = ["K11_FIBROCHIRLIV", "FIBROLIV", "CIRRHOSIS_BROAD",
                        "CHIRHEP_NAS", "NASH", "NAFLD"]
@@ -1175,47 +1045,3 @@ def panel_fig4G(fig, gs_slot, data):
         out_xlim=(-0.4, 3.8), out_xticks=[0.0, 1.0, 2.0, 3.0],
     )
 
-def build_figure_4():
-    d = load_fig4_data()
-    plt.close("all")
-    fig = plt.figure(figsize=(15.5, 13.5))
-    outer = GridSpec(2, 3, figure=fig,
-                     height_ratios=[0.85, 1.15],
-                     hspace=0.42, wspace=0.35,
-                     left=0.05, right=0.97, top=0.96, bottom=0.04)
-
-    ax_funnel = fig.add_subplot(outer[0, 0])
-    panel_fig4A(fig, ax_funnel, d)
-    hs_panel_letter(fig, ax_funnel, "A", dx=-0.02, dy=0.01, fontsize=14)
-
-    axB = fig.add_subplot(outer[0, 1])
-    panel_fig4B(fig, axB, d)
-    hs_panel_letter(fig, axB, "B", dx=-0.04, dy=0.01, fontsize=14)
-
-    axC = fig.add_subplot(outer[0, 2])
-    panel_fig4C(fig, axC, d)
-    hs_panel_letter(fig, axC, "C", dx=-0.04, dy=0.01, fontsize=14)
-
-    axD_exp, _ = panel_fig4D(fig, outer[1, 0], d)
-    pos = axD_exp.get_position()
-    fig.text(pos.x0 - 0.05, pos.y1 + 0.010, "D",
-             fontsize=14, fontweight="bold", color=INK, va="bottom", ha="left")
-
-    axE_exp, axE_out = panel_fig4E(fig, outer[1, 1], d)
-    pos = axE_exp.get_position()
-    fig.text(pos.x0 - 0.05, pos.y1 + 0.010, "E",
-             fontsize=14, fontweight="bold", color=INK, va="bottom", ha="left")
-
-    pos_d = axD_exp.get_position()
-    pos_e = axE_out.get_position()
-    super_x = (pos_d.x0 + pos_e.x1) / 2
-    super_y = max(pos_d.y1, pos_e.y1) + 0.055
-    fig.text(super_x, super_y, "Mendelian-Randomization Landscape",
-             ha="center", va="bottom", fontsize=11, fontweight="bold", color=INK)
-    fig.text(super_x, super_y - 0.017, f"Liver {EN_DASH} Cirrhosis Prioritization",
-             ha="center", va="bottom", fontsize=9.5, style="italic", color=NEUTRAL_GREY)
-
-    axF = fig.add_subplot(outer[1, 2])
-    panel_fig4F(fig, axF, d)
-    hs_panel_letter(fig, axF, "F", dx=-0.03, dy=0.01, fontsize=14)
-    return fig

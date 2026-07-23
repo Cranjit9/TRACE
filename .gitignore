@@ -76,13 +76,5 @@ tmp/
 temp/
 .claude/
 
-# Figure composers under scripts/figures/ are intentionally tracked.
-!scripts/figures/
-!scripts/figures/**
-
-# Re-exclude bytecode inside the un-ignored scripts/figures tree.
-scripts/figures/__pycache__/
-scripts/figures/**/*.pyc
-
 # Manuscript drafts (docx/pdf) are kept local, not versioned.
 manuscript/

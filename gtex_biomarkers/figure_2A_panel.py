@@ -10,9 +10,9 @@ import numpy as np
 import pandas as pd
 from matplotlib import rcParams
 
-ROOT = Path(__file__).resolve().parents[2]
-TABLE_CSV = ROOT / "output" / "tables" / "pair_class_balance.csv"
-OUT_DIR = ROOT / "output" / "figures" / "main_v2"
+from gtex_biomarkers.config import Config
+TABLE_CSV = Config.TABLES_DIR / "pair_class_balance.csv"
+OUT_DIR = Config.FIGURES_DIR / "main_v2"
 
 POS_COLOR = "#0072B2"
 NEG_COLOR = "#E69F00"
