@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Execute the canonical analysis notebooks into a separate directory, then
-# render the approved final figures.  No notebook is modified in place and no
-# machine-specific path or sudo operation is required.
+# Execute the full pipeline (NB01-NB18) into output/executed_notebooks/;
+# per-notebook logs land in _runlogs/. Source notebooks are not modified.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NB_DIR="${ROOT}/notebooks"
 EXEC_DIR="${ROOT}/output/executed_notebooks"
@@ -41,6 +40,8 @@ NOTEBOOKS=(
   14_ukbpp_validation
   15_liver_tissue_validation
   16_multipanel_figures
+  17_main_figures
+  18_supplementary
 )
 
 for stem in "${NOTEBOOKS[@]}"; do
@@ -57,6 +58,4 @@ for stem in "${NOTEBOOKS[@]}"; do
     >"${LOG_DIR}/${stem}.log" 2>&1
 done
 
-"${PYTHON}" "${ROOT}/scripts/render_final_figures.py"
-"${PYTHON}" "${ROOT}/scripts/verify_final_figures.py"
-echo "Canonical notebooks and final figures completed successfully."
+echo "All notebooks executed successfully."
