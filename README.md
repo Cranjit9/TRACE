@@ -1,8 +1,6 @@
 # TRACE
 
-Whole-blood gene expression as a non-invasive proxy for organ-specific tissue pathology. Reproduces the analyses and figures for the manuscript.
-
-**Manuscript**: `manuscript/manuscript_v5_TRACE.docx` and `manuscript/supplementary_v5_TRACE.docx`.
+TRACE (Transcriptomic Reading of Affected organs and Causal Evaluation) is a confounder-aware framework asking two sequential questions across a pathology-linked GTEx benchmark: which organ pathologies leave a detectable trace in the whole-blood transcriptome beyond donor demographics and procedural covariates, and whether that trace is causal or reactive. Each pathology is first tested against a clinical-covariate baseline using per-fold covariate orthogonalization on principal-component features, and surviving signals are triaged through cis-pQTL-anchored Mendelian randomization against UK Biobank plasma proteomics and FinnGen R12 outcomes. Only a minority of pathologies clear the detection gate, with liver-cirrhosis emerging as the strongest signal and SERPINE1 as its leading causal driver.
 
 ## Setup
 
