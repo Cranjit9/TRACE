@@ -1143,7 +1143,7 @@ def build_S6():
     fig_c = build_S6C(mr_st_prt)
     plt.close(fig_a); plt.close(fig_b); plt.close(fig_c)
     # Fall through — return a compact single-panel figure for the old inline
-    # embed path. NB18 now uses build_S6A/B/C + compose_figure_S6_vector.
+    # embed path. NB17 now uses build_S6A/B/C + compose_vector.compose_figure_S6.
     return build_S6A(mr_st_drv, mr_st_prt)
 
 def build_S6A(mr_st_drv, mr_st_prt):

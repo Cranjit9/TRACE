@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Execute the full pipeline (NB01-NB18) into output/executed_notebooks/;
+# Execute the full pipeline (NB01-NB17) into output/executed_notebooks/;
 # per-notebook logs land in _runlogs/. Source notebooks are not modified.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NB_DIR="${ROOT}/notebooks"
@@ -39,8 +39,8 @@ NOTEBOOKS=(
   13_organ_enrichment
   14_ukbpp_validation
   15_liver_tissue_validation
-  17_main_figures
-  18_supplementary
+  16_main_figures
+  17_supplementary
 )
 
 for stem in "${NOTEBOOKS[@]}"; do
