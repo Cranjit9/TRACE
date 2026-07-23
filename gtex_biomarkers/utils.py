@@ -7,37 +7,18 @@ from joblib import Parallel, delayed
 from gtex_biomarkers.config import Config
 from gtex_biomarkers.models import run_tissue_models, run_tissue_confounder_models
 
-
 def run_all_tissue_models_parallel(pairs_df, df_meta_url, blood_subjid, X_wb,
                                    model_factory, cfg=None, n_jobs=-1,
                                    save_features=False):
-    """Run CV models for all tissue × category pairs, parallelized by tissue.
-
-    Parameters
-    ----------
-    pairs_df : DataFrame — columns: tissue, category, n_samples
-    df_meta_url : DataFrame — pathology metadata
-    blood_subjid : Series — blood SAMPID → donor SUBJID
-    X_wb : DataFrame — blood expression matrix
-    model_factory : callable — returns a fresh model per fold
-    n_jobs : int — number of parallel workers (-1 = all cores)
-    save_features : bool — if True, capture per-fold gene importances
-
-    Returns
-    -------
-    results_dict : dict — {tag: result_dict}
-    summary_df : DataFrame — sorted by mean_auc descending
-    """
+    """Run CV models for all tissue × category pairs, parallelized by tissue."""
     cfg = cfg or Config
 
-    # Group by tissue
     tissue_groups = {}
     for _, row in pairs_df.iterrows():
         tissue_groups.setdefault(row["tissue"], []).append(
             (row["category"], row["n_samples"])
         )
 
-    # Run in parallel
     parallel_out = Parallel(n_jobs=n_jobs, verbose=10)(
         delayed(run_tissue_models)(
             tissue, cat_list, df_meta_url, blood_subjid, X_wb,
@@ -46,14 +27,12 @@ def run_all_tissue_models_parallel(pairs_df, df_meta_url, blood_subjid, X_wb,
         for tissue, cat_list in sorted(tissue_groups.items())
     )
 
-    # Collect
     results_dict = {}
     for tissue_results in parallel_out:
         for tag, res in tissue_results:
             results_dict[tag] = res
 
     return results_dict, _make_summary(results_dict)
-
 
 def _make_summary(results_dict):
     """Build a summary DataFrame from a results dict."""
@@ -65,19 +44,10 @@ def _make_summary(results_dict):
     ]
     return pd.DataFrame(rows).sort_values("mean_auc", ascending=False)
 
-
 def run_all_confounder_models_parallel(pairs_df, df_meta_url, blood_subjid,
                                        X_wb, X_conf, model_factory,
                                        cfg=None, n_jobs=-1):
-    """Run clinical co-variate-only AND expression+clinical co-variate RF models, parallelized by tissue.
-
-    Returns
-    -------
-    conf_results : dict — {tag: result_dict} for clinical co-variate-only models
-    conf_summary : DataFrame
-    comb_results : dict — {tag: result_dict} for expression+clinical co-variate models
-    comb_summary : DataFrame
-    """
+    """Run clinical co-variate-only AND expression+clinical co-variate RF models, parallelized by tissue."""
     cfg = cfg or Config
 
     tissue_groups = {}
@@ -104,14 +74,8 @@ def run_all_confounder_models_parallel(pairs_df, df_meta_url, blood_subjid,
     return (conf_results, _make_summary(conf_results),
             comb_results, _make_summary(comb_results))
 
-
 def build_comparison_table(lr_summary, rf_summary):
-    """Merge LR and RF summaries into a comparison table.
-
-    Returns
-    -------
-    comp : DataFrame — with columns mean_auc_lr, mean_auc_rf, auc_diff
-    """
+    """Merge LR and RF summaries into a comparison table."""
     comp = lr_summary.merge(
         rf_summary, on=["tissue", "category"], suffixes=("_lr", "_rf"), how="outer"
     )
@@ -119,14 +83,8 @@ def build_comparison_table(lr_summary, rf_summary):
     comp = comp.sort_values("auc_diff", ascending=False)
     return comp
 
-
 def top_models_table(summary_df, results_dict, auc_cutoff=None):
-    """Filter to models above AUC cutoff and add sample counts.
-
-    Returns
-    -------
-    top_df : DataFrame — with n_blood_samples, n_positive, prevalence columns
-    """
+    """Filter to models above AUC cutoff and add sample counts."""
     auc_cutoff = auc_cutoff or Config.AUC_THRESH
     top = summary_df[summary_df["mean_auc"] >= auc_cutoff].copy()
     top = top.sort_values("mean_auc", ascending=False).reset_index(drop=True)

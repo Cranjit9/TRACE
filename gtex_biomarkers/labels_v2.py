@@ -1,63 +1,10 @@
-"""Pathology label extraction from GTEx `Pathology.Notes`.
-
-Regex + ConText-style negation + percentage-based severity extraction.
-
-Vocabulary
-----------
-**79 category patterns**, covering two superimposed vocabularies:
-- All 57 tokens GTEx pathologists use in the structured `Pathology.Categories` field.
-- 22 additional concepts that appear in the free-text notes but were never
-  structure-coded (e.g. `plaque`, `intimal_thickening`, `fatty_infiltration`,
-  `medial_degeneration`, `neoplasm`, `regressive_change`, `sertoli_only`,
-  `bronchitis`, `colitis`, `amyloidosis`).
-The 22 additional concepts cannot be validated against GTEx ground truth
-(they have no structured-field equivalent), but they still produce labels in
-the output matrices.
-
-Design choices
---------------
-- **Negation.** `_is_negated` looks back from the regex match within the same
-  subclause. Negation is suppressed if a positive qualifier (e.g. `mild`, `60%`)
-  sits between the negation trigger and the matched term — handles phrases like
-  "no significant fibrosis but moderate steatosis" correctly.
-- **Self-negating labels** (`no_abnormalities`, `clean_specimens`) skip the
-  negation check since the negation IS the label.
-- **Subclause-level exclusions.** `_RAW_PATTERNS[cat]["exclude"]` lists peer
-  categories that should suppress this one when they co-occur in the same
-  subclause (e.g. `neuroendocrine_tumor` suppresses the generic `neoplasm`).
-- **Word-boundary anchors and negative lookbehinds** prevent overlapping
-  patterns from double-firing (e.g. `atherosclerosis` and `sclerotic` no longer
-  collide; `hemosiderin-laden macrophages` is counted as macrophages, not pigment).
-- **Severity.** `extract_severities` returns a 0–100 percent per category.
-  An explicit percentage in the same subclause as the match wins ("60% steatosis").
-  Range mid-point for "20-30% fibrosis". Ordinal qualifier (`mild`=15, `moderate`=35,
-  `severe`=70) as a fallback. NaN if no severity signal — binary positive does
-  not imply a known severity.
-
-Public API
-----------
-- `extract_categories_v2(notes_text) -> list[(category, confidence)]`
-- `extract_severities(notes_text) -> dict[category, percent]`
-- `extract_label_set(notes_text, min_confidence=0.5) -> list[category]`
-
-Usage:
-    from gtex_biomarkers.labels_v2 import extract_categories_v2, extract_severities
-    extract_categories_v2("60% steatosis, mild fibrosis")
-    # -> [('steatosis', 0.9), ('fibrosis', 0.9)]
-    extract_severities("60% steatosis, mild fibrosis")
-    # -> {'steatosis': 60.0, 'fibrosis': 15.0}
-"""
+"""Pathology label extraction from GTEx `Pathology.Notes` (regex + ConText-style negation + % severity)."""
 
 import re
 from collections import defaultdict
 from typing import Dict, List, Tuple
 
-
-# ── Category vocabulary ───────────────────────────────────────────────────────
-# Each entry: (compiled regex, exclude_categories_in_same_subclause, skip_negation_flag)
-
 _RAW_PATTERNS: Dict[str, dict] = {
-    # ── Liver / hepatic ──────────────────────────────────────────────────────
     "steatosis": dict(
         # Note: "fatty infiltration" is a separate label (often non-liver muscle fat
         # replacement); it is NOT matched here to avoid co-firing with fatty_infiltration.
@@ -77,7 +24,6 @@ _RAW_PATTERNS: Dict[str, dict] = {
     ),
     "necrosis": dict(pat=r"\bnecrosi[sc]?\b|\bnecrotic\b", exclude=[]),
 
-    # ── Vascular ─────────────────────────────────────────────────────────────
     "atherosclerosis": dict(
         pat=r"\batheroscleros\w*|\batherosclerotic\b",
         exclude=[],
@@ -107,7 +53,6 @@ _RAW_PATTERNS: Dict[str, dict] = {
         exclude=[],
     ),
 
-    # ── General ──────────────────────────────────────────────────────────────
     "congestion": dict(
         pat=r"\bcong[ne]?st\w*|\bsinusoidal\s+dilat\w*|\bvenous\s+distens",
         exclude=[],
@@ -133,7 +78,6 @@ _RAW_PATTERNS: Dict[str, dict] = {
         exclude=[],
     ),
 
-    # ── Inflammatory / immune ────────────────────────────────────────────────
     "inflammation": dict(
         # Includes lymphocyte/leukocyte collections and Hashimoto thyroiditis
         # (which is inflammatory by definition — pathologists co-tag both).
@@ -157,11 +101,9 @@ _RAW_PATTERNS: Dict[str, dict] = {
         exclude=[],
     ),
 
-    # ── Lung-specific ────────────────────────────────────────────────────────
     "atelectasis": dict(pat=r"\batelect\w*", exclude=[]),
     "emphysema": dict(pat=r"\bemphysem\w*", exclude=[]),
 
-    # ── Tissue-specific ──────────────────────────────────────────────────────
     "spermatogenesis": dict(
         pat=r"\bspermatogene\w*|\bspermatid\w*|\bspermatocyt\w*",
         exclude=[],
@@ -186,7 +128,6 @@ _RAW_PATTERNS: Dict[str, dict] = {
         exclude=[],
     ),
 
-    # ── Pigment (suppressed if macrophages co-mentioned) ─────────────────────
     "pigment": dict(
         # GTEx pathologists tag "hemosiderin-laden macrophages" as macrophages
         # (not pigment). Match the standalone pigment terms but explicitly
@@ -199,7 +140,6 @@ _RAW_PATTERNS: Dict[str, dict] = {
         exclude=[],
     ),
 
-    # ── Tissue-specific lesions / inflammatory disorders ─────────────────────
     "amyloidosis": dict(
         pat=r"\bamyloid(?:osis)?\w*|\bamyloid[-\s]like\s+material",
         exclude=[],
@@ -406,7 +346,7 @@ _RAW_PATTERNS: Dict[str, dict] = {
         exclude=[],
     ),
 
-    # ── Negative findings (special: skip negation since they ARE negations) ──
+    # Self-negating labels: skip negation check since the negation IS the label.
     "no_abnormalities": dict(
         pat=(
             r"\bno\s+(?:significant\s+|major\s+)?abnormal\w*"
@@ -428,7 +368,6 @@ _RAW_PATTERNS: Dict[str, dict] = {
     ),
 }
 
-
 def _compile_patterns(raw: Dict[str, dict]) -> Dict[str, dict]:
     out = {}
     for cat, spec in raw.items():
@@ -439,12 +378,9 @@ def _compile_patterns(raw: Dict[str, dict]) -> Dict[str, dict]:
         )
     return out
 
-
 COMPILED_V2 = _compile_patterns(_RAW_PATTERNS)
 NORMAL_LABELS = {"no_abnormalities", "clean_specimens"}
 
-
-# ── Splitting and qualifier patterns ─────────────────────────────────────────
 _CLAUSE_SPLIT = re.compile(r"[.;]")
 _SCOPE_TERM_SPLIT = re.compile(
     r"\b(?:and|but|however|yet|although|except|presenting|presents)\b"
@@ -465,7 +401,6 @@ _NEGATION_TRIGGER = re.compile(
     re.IGNORECASE,
 )
 
-
 def _smart_comma_split(text: str) -> List[str]:
     parts, depth, current = [], 0, []
     for ch in text:
@@ -481,56 +416,39 @@ def _smart_comma_split(text: str) -> List[str]:
     parts.append("".join(current).strip())
     return [p for p in parts if p]
 
-
 def _is_negated(subclause: str, match_start: int, match_end: int) -> bool:
-    """Negation if a negation trigger appears within the subclause AND is closer
-    to the match than any positive qualifier between trigger and match."""
+    """Negated iff a negation trigger precedes the match with no positive qualifier between."""
     pre = subclause[:match_start]
     neg = list(_NEGATION_TRIGGER.finditer(pre))
     if not neg:
         return False
-    # Use the closest negation trigger
     last_neg = neg[-1]
-    # If a clause-breaker (comma already handled) or a positive qualifier sits
-    # BETWEEN the negation and the match, treat as not-negated.
+    # A positive qualifier between the negation and the match cancels the negation.
     between = subclause[last_neg.end():match_start]
     if _POSITIVE_QUALIFIER.search(between):
         return False
     return True
-
 
 _SCLEROTIC_PARENT_TRIGGERS = re.compile(
     r"\batheroscleros\w*|\barterioscleros\w*|\bglomeruloscleros\w*|\bnephroscleros\w*",
     re.IGNORECASE,
 )
 
-
 def extract_categories_v2(notes_text: str) -> List[Tuple[str, float]]:
-    """Extract pathology categories with per-label confidence in [0, 1].
-
-    Confidence components:
-        base = 0.7
-        +0.2 if a positive qualifier (mild/moderate/severe/% etc.) appears in
-              the same subclause
-        +0.1 if the category matches in more than one subclause across the note
-        Hard zero if the match is negated and the category does not have
-        skip_negation=True.
-    """
+    """Extract pathology categories with per-label confidence in [0, 1]."""
     if not isinstance(notes_text, str) or not notes_text.strip():
         return []
 
-    # Track raw mentions: category -> list of (confidence, was_negated)
     mentions: Dict[str, List[float]] = defaultdict(list)
-    subclause_categories: List[set] = []  # per-subclause sets for exclusion
+    subclause_categories: List[set] = []
 
-    # Pass 1: enumerate all clause/subclause matches
     raw_per_subclause = []
     for clause in _CLAUSE_SPLIT.split(notes_text):
         for sub in _smart_comma_split(clause):
             sub = sub.strip()
             if not sub:
                 continue
-            sub_matches = {}  # cat -> (confidence_components_dict)
+            sub_matches = {}
             has_qualifier = bool(_POSITIVE_QUALIFIER.search(sub))
             for cat, spec in COMPILED_V2.items():
                 m = spec["rx"].search(sub)
@@ -544,7 +462,6 @@ def extract_categories_v2(notes_text: str) -> List[Tuple[str, float]]:
                 sub_matches[cat] = conf
             raw_per_subclause.append((sub, sub_matches))
 
-    # Pass 2: apply exclusion rules at the subclause level
     accepted = []
     for sub, sub_matches in raw_per_subclause:
         cats_here = set(sub_matches.keys())
@@ -557,26 +474,22 @@ def extract_categories_v2(notes_text: str) -> List[Tuple[str, float]]:
     if not accepted:
         return []
 
-    # Pass 3: aggregate across subclauses
     per_cat_confs: Dict[str, List[float]] = defaultdict(list)
     for cat, conf in accepted:
         per_cat_confs[cat].append(conf)
 
     out: List[Tuple[str, float]] = []
     for cat, confs in per_cat_confs.items():
-        # Take max confidence; bonus for multi-subclause mentions
         c = max(confs)
         if len(confs) > 1:
-            c = min(1.0, c + 0.1)
+            c = min(1.0, c + 0.1)  # bonus for multi-subclause mentions
         out.append((cat, round(c, 3)))
 
-    # GTEx tags atherosclerosis / glomerulosclerosis / nephrosclerosis as
-    # ALSO sclerotic. Mirror that parent/child relationship.
+    # GTEx tags atherosclerosis / glomerulosclerosis / nephrosclerosis as ALSO sclerotic.
     if _SCLEROTIC_PARENT_TRIGGERS.search(notes_text):
         if not any(c == "sclerotic" for c, _ in out):
             out.append(("sclerotic", 0.7))
 
-    # If real pathology found, drop normal labels
     real = [c for c, _ in out if c not in NORMAL_LABELS]
     if real:
         out = [(c, conf) for c, conf in out if c not in NORMAL_LABELS]
@@ -584,16 +497,9 @@ def extract_categories_v2(notes_text: str) -> List[Tuple[str, float]]:
     out.sort(key=lambda t: (-t[1], t[0]))
     return out
 
-
 def extract_label_set(notes_text: str, min_confidence: float = 0.5) -> List[str]:
     """Convenience: return just the category names above a confidence threshold."""
     return [c for c, conf in extract_categories_v2(notes_text) if conf >= min_confidence]
-
-
-# ── Severity extraction (numeric % grade) ────────────────────────────────────
-# GTEx pathologists quote a percentage when grading findings (e.g. "60% steatosis",
-# "30-40% fibrosis", "atherosclerosis ~50%"). We extract that 0-100 percent
-# directly from the note, falling back to ordinal qualifiers when absent.
 
 _PERCENT_RX = re.compile(
     r"(?:~|≈|about\s+|up\s+to\s+|approximately\s+)?"
@@ -620,16 +526,13 @@ _GRADE_RX = re.compile(
     re.IGNORECASE,
 )
 
-
 def _extract_subclause_severity(subclause: str) -> float:
     """Return a 0-100 severity for a subclause, preferring explicit % over qualifier."""
-    # Explicit range first ("20-30%")
     m = _PERCENT_RANGE_RX.search(subclause)
     if m:
         lo, hi = float(m.group(1)), float(m.group(2))
         if 0 <= lo <= 100 and 0 <= hi <= 100:
             return round((lo + hi) / 2.0, 2)
-    # Single percent
     nums = []
     for m in _PERCENT_RX.finditer(subclause):
         v = float(m.group(1))
@@ -637,21 +540,13 @@ def _extract_subclause_severity(subclause: str) -> float:
             nums.append(v)
     if nums:
         return round(sum(nums) / len(nums), 2)
-    # Fallback to qualifier
     qm = _GRADE_RX.search(subclause)
     if qm:
         return float(_GRADE_TO_PERCENT[qm.group(1).lower()])
     return float("nan")
 
-
 def extract_severities(notes_text: str) -> Dict[str, float]:
-    """Return {category: percent_severity} for each matched (non-negated) category.
-
-    Severity is taken from the subclause the category matched in. When multiple
-    subclauses match, the max severity is kept (pathologists typically grade the
-    worst-affected region). Returns NaN-free dict — categories without any
-    severity signal are omitted (use extract_categories_v2 for presence/absence).
-    """
+    """Return {category: percent_severity} for each matched (non-negated) category."""
     if not isinstance(notes_text, str) or not notes_text.strip():
         return {}
 

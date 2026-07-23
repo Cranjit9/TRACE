@@ -8,29 +8,8 @@ import numpy as np
 
 from gtex_biomarkers.config import Config
 
-
 def load_raw_data(cfg=None):
-    """Load the four input files and return them as DataFrames.
-
-    `df_meta_url` is augmented with a `Pathology.Categories.Final` column that
-    combines GTEx's structured `Pathology.Categories` field with NLP-imputed
-    labels extracted from `Pathology.Notes` by `gtex_biomarkers.labels_v2`.
-    Downstream label functions read `Pathology.Categories.Final` by default,
-    so every model uses the imputed labels transparently.
-
-    The merged file lives at `data/processed/meta_data_with_url_imputed.csv`,
-    produced by notebook 03. If that file is missing (e.g. on a fresh clone),
-    we fall back to computing the imputation on the fly so notebooks still work
-    without first executing NB03.
-
-    Returns
-    -------
-    df_expr : DataFrame  — gene TPM expression (genes x samples)
-    df_samples : DataFrame — sample-level metadata
-    df_age : DataFrame — donor-level restricted data (AGE, SEX, …)
-    df_meta_url : DataFrame — pathology metadata with tissue info, including
-                              `Pathology.Categories.Final`
-    """
+    """Load the four input files and return them as DataFrames."""
     cfg = cfg or Config
 
     df_expr = pd.read_csv(cfg.EXPR_FILE, sep="\t", skiprows=2)
@@ -41,7 +20,7 @@ def load_raw_data(cfg=None):
     if imputed_path.exists():
         df_meta_url = pd.read_csv(imputed_path)
     else:
-        # Fallback: read raw meta and compute imputed labels in-process.
+        # Fallback: compute imputed labels in-process when NB03 output is absent.
         from gtex_biomarkers.labels_v2 import extract_categories_v2
         df_meta_url = pd.read_csv(cfg.PATHOLOGY_FILE)
         nlp_pred = df_meta_url["Pathology.Notes"].apply(
@@ -54,26 +33,13 @@ def load_raw_data(cfg=None):
 
     return df_expr, df_samples, df_age, df_meta_url
 
-
 def filter_whole_blood(df_samples):
-    """Filter sample metadata to Whole Blood only.
-
-    Returns
-    -------
-    blood_meta : DataFrame — rows where SMTSD == 'Whole Blood'
-    """
+    """Filter sample metadata to Whole Blood only."""
     blood_meta = df_samples[df_samples["SMTSD"] == "Whole Blood"].copy()
     return blood_meta
 
-
 def build_blood_expression_matrix(df_expr, blood_meta):
-    """Build (samples x genes) expression matrix for Whole Blood.
-
-    Returns
-    -------
-    X_wb : DataFrame — shape (n_blood_samples, n_genes), index = SAMPID
-    df_blood_wb : DataFrame — subset of expression table with Name/Description
-    """
+    """Build (samples x genes) expression matrix for Whole Blood."""
     expr_sample_cols = list(df_expr.columns[2:])
     whole_blood_ids = set(blood_meta["SAMPID"].astype(str))
     overlap_wb = [sid for sid in expr_sample_cols if sid in whole_blood_ids]
@@ -87,57 +53,26 @@ def build_blood_expression_matrix(df_expr, blood_meta):
 
     return X_wb, df_blood_wb
 
-
 def variance_filter(X_wb, n_top=None):
-    """Keep only the top-N highest-variance genes.
-
-    Parameters
-    ----------
-    X_wb : DataFrame — (samples x genes)
-    n_top : int — number of genes to keep (default: Config.N_TOP_VAR_GENES)
-
-    Returns
-    -------
-    X_wb_var : DataFrame — (samples x n_top)
-    gene_var : Series — variance per gene, sorted descending
-    """
+    """Keep only the top-N highest-variance genes."""
     n_top = n_top or Config.N_TOP_VAR_GENES
     gene_var = X_wb.var(axis=0).sort_values(ascending=False)
     top_genes = gene_var.head(n_top).index.tolist()
     X_wb_var = X_wb[top_genes]
     return X_wb_var, gene_var
 
-
 CONFOUNDER_COLS = ["SEX", "AGE", "RACE", "DTHHRDY", "TRISCHD"]
 
-
 def build_confounder_matrix(df_age, blood_subjid):
-    """Build donor-level clinical co-variate matrix aligned to blood samples.
-
-    Features: SEX, AGE, RACE, DTHHRDY (Hardy Scale), TRISCHD (ischemic time).
-    RACE codes 98/99 are treated as missing.  NaNs are left in place — median
-    imputation is applied within each train fold by `run_cv` to avoid
-    train/test leakage.
-
-    Parameters
-    ----------
-    df_age : DataFrame — donor-level restricted data (one row per donor)
-    blood_subjid : Series — index = SAMPID, values = donor SUBJID
-
-    Returns
-    -------
-    X_conf : DataFrame — shape (n_blood_samples, n_confounders), index = SAMPID,
-             with NaN entries preserved for per-fold imputation downstream.
-    """
+    """Build donor-level clinical co-variate matrix aligned to blood samples."""
     conf = df_age.drop_duplicates("SUBJID").set_index("SUBJID")
     cols = [c for c in CONFOUNDER_COLS if c in conf.columns]
     conf = conf[cols].copy()
 
-    # Clean RACE: 98/99 = unknown → NaN
+    # RACE codes 98/99 are unknown; leave NaN for per-fold imputation downstream.
     if "RACE" in conf.columns:
         conf.loc[conf["RACE"].isin([98, 99]), "RACE"] = np.nan
 
-    # Map to blood samples via SUBJID
     X_conf = pd.DataFrame(index=blood_subjid.index)
     for col in cols:
         X_conf[col] = blood_subjid.map(conf[col])
@@ -145,16 +80,8 @@ def build_confounder_matrix(df_age, blood_subjid):
     X_conf = X_conf.astype(float)
     return X_conf
 
-
 def build_blood_subjid(X_wb):
-    """Map each Whole Blood sample ID to donor SUBJID.
-
-    SAMPID format: GTEX-XXXX-..., SUBJID = first two parts joined by '-'.
-
-    Returns
-    -------
-    blood_subjid : Series — index = SAMPID, values = SUBJID
-    """
+    """Map each Whole Blood sample ID to donor SUBJID."""
     blood_subjid = (
         pd.Series(X_wb.index, index=X_wb.index)
         .astype(str)
@@ -162,17 +89,10 @@ def build_blood_subjid(X_wb):
     )
     return blood_subjid
 
-
-# ── Cache helpers ────────────────────────────────────────────────────────────
-
 _CACHE_FILE = "processed_data.pkl"
 
-
 def save_cache(X_wb, blood_subjid, blood_meta, df_meta_url, df_age, cfg=None):
-    """Save processed data objects to a single pickle file in CACHE_DIR.
-
-    Call this at the end of notebook 01 after building all core objects.
-    """
+    """Save processed data objects to a single pickle file in CACHE_DIR."""
     cfg = cfg or Config
     cfg.CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = cfg.CACHE_DIR / _CACHE_FILE
@@ -188,23 +108,8 @@ def save_cache(X_wb, blood_subjid, blood_meta, df_meta_url, df_age, cfg=None):
     size_mb = cache_path.stat().st_size / (1024 * 1024)
     print(f"Cache saved → {cache_path}  ({size_mb:.1f} MB)")
 
-
 def load_cache(cfg=None):
-    """Load processed data from cache.
-
-    Returns
-    -------
-    X_wb : DataFrame — (samples × genes)
-    blood_subjid : Series — SAMPID → SUBJID mapping
-    blood_meta : DataFrame — Whole Blood sample metadata
-    df_meta_url : DataFrame — pathology metadata
-    df_age : DataFrame — donor-level restricted data
-
-    Raises
-    ------
-    FileNotFoundError
-        If cache does not exist — run notebook 01 first.
-    """
+    """Load processed data from cache."""
     cfg = cfg or Config
     cache_path = cfg.CACHE_DIR / _CACHE_FILE
     if not cache_path.exists():

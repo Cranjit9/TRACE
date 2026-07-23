@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 
+from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -12,16 +13,67 @@ from sklearn.metrics import roc_curve, roc_auc_score
 
 from gtex_biomarkers.config import Config
 
+def _direction_agnostic_auc(scores, binary_target):
+    """max(AUC, 1-AUC); returns 0.5 if target degenerate or n<5."""
+    s = pd.to_numeric(scores, errors="coerce")
+    t = pd.to_numeric(binary_target, errors="coerce")
+    mask = s.notna() & t.notna()
+    if mask.sum() < 5:
+        return 0.5
+    tt = t[mask].astype(int)
+    if tt.nunique() < 2:
+        return 0.5
+    auc = roc_auc_score(tt, s[mask])
+    return float(max(auc, 1.0 - auc))
+
+def _binarize_at_median(s):
+    """Binarize a continuous Series at its median (within the input subset)."""
+    s = pd.to_numeric(s, errors="coerce")
+    med = s.median()
+    return (s > med).astype(int)
+
+def _compute_pc_covariate_aucs(pcs_df, X_covar):
+    """Per-PC direction-agnostic AUC against each of the 5 clinical covariates."""
+    # Recipe locked 2026-06-22: SEX direct; AGE/TRISCHD binarize-at-median;
+    # RACE and DTHHRDY one-vs-rest max AUC across classes.
+    out = pd.DataFrame(
+        index=pcs_df.columns,
+        columns=["AGE", "SEX", "RACE", "DTHHRDY", "TRISCHD"],
+        dtype=float,
+    )
+
+    sex = pd.to_numeric(X_covar["SEX"], errors="coerce")
+    age_b = _binarize_at_median(X_covar["AGE"])
+    trischd_b = _binarize_at_median(X_covar["TRISCHD"])
+
+    for pc in pcs_df.columns:
+        pc_vals = pcs_df[pc]
+        out.at[pc, "SEX"] = _direction_agnostic_auc(pc_vals, sex)
+        out.at[pc, "AGE"] = _direction_agnostic_auc(pc_vals, age_b)
+        out.at[pc, "TRISCHD"] = _direction_agnostic_auc(pc_vals, trischd_b)
+
+    for col_name in ("RACE", "DTHHRDY"):
+        col = X_covar[col_name]
+        levels = sorted({float(v) for v in col.dropna().unique()})
+        best = pd.Series(0.5, index=pcs_df.columns, dtype=float)
+        for lvl in levels:
+            tgt = (col == lvl).astype(int)
+            if tgt.sum() < 5 or (1 - tgt).sum() < 5:
+                continue
+            for pc in pcs_df.columns:
+                a = _direction_agnostic_auc(pcs_df[pc], tgt)
+                if a > best[pc]:
+                    best[pc] = a
+        out[col_name] = best
+
+    return out
+
+def _drop_covariate_aligned_pcs(pc_aucs_per_covar, threshold):
+    """Boolean keep mask: True iff max AUC across covariates <= threshold."""
+    return pc_aucs_per_covar.max(axis=1) <= threshold
 
 def _auc_feature_selection(Xtr, ytr, top_k=None):
-    """Per-gene AUC-based feature selection on training data only.
-
-    For each gene, compute |AUC - 0.5| against the binary label. Missing values
-    are imputed with the train-fold median per column (never with 0, never with
-    test-fold information).
-
-    Return the top_k gene column names.
-    """
+    """Per-gene AUC-based feature selection on training data only."""
     top_k = top_k or Config.TOP_K_FEATURES
     strengths = {}
     for col in Xtr.columns:
@@ -36,17 +88,11 @@ def _auc_feature_selection(Xtr, ytr, top_k=None):
     scores = pd.Series(strengths).reindex(Xtr.columns).fillna(0)
     return scores.nlargest(top_k).index.tolist()
 
-
 def _impute_train_fold(Xtr, Xte):
-    """Median-impute Xtr (using train-fold medians) and apply same medians to Xte.
-
-    Preserves DataFrame index/columns. Columns where train-fold median is NaN
-    (all-NaN in train) fall back to 0.
-    """
+    """Median-impute Xtr (using train-fold medians) and apply same medians to Xte."""
     med = Xtr.median(numeric_only=True)
-    med = med.where(med.notna(), 0.0)
+    med = med.where(med.notna(), 0.0)  # all-NaN train columns fall back to 0
     return Xtr.fillna(med), Xte.fillna(med)
-
 
 def make_lr_pipeline(cfg=None):
     """Create a Logistic Regression pipeline with StandardScaler."""
@@ -59,7 +105,6 @@ def make_lr_pipeline(cfg=None):
         )),
     ])
 
-
 def make_rf_model(cfg=None):
     """Create a Random Forest classifier (no scaler needed)."""
     cfg = cfg or Config
@@ -71,7 +116,6 @@ def make_rf_model(cfg=None):
         n_jobs=1,  # n_jobs=1 inside parallel workers to avoid oversubscription
     )
 
-
 def _compute_oof_threshold(y, oof):
     """Compute Youden's J optimal threshold from OOF predictions."""
     mask = ~np.isnan(oof)
@@ -81,35 +125,9 @@ def _compute_oof_threshold(y, oof):
     j_scores = tpr_oof - fpr_oof
     return thresholds_oof[np.argmax(j_scores)]
 
-
 def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
            save_features=False, X_extra=None, feature_selection=True):
-    """Run leak-free 5-fold grouped CV.
-
-    Unified CV function supporting three modes:
-    - feature_selection=True, X_extra=None  → AUC-based FS on X (expression only)
-    - feature_selection=False, X_extra=None → no FS, use all columns (e.g. clinical co-variates)
-    - feature_selection=True, X_extra=df    → AUC-based FS on X, concat X_extra always
-
-    Parameters
-    ----------
-    X : DataFrame — (samples × genes) or (samples × clinical co-variates)
-    y : Series — binary labels (0/1)
-    groups : Series — donor SUBJID for grouping
-    model_factory : callable — returns a fresh model/pipeline per fold
-    cfg : Config class
-    top_k : int — number of features to select per fold
-    save_features : bool — if True, capture selected genes + RF importances
-    X_extra : DataFrame — extra columns always included (e.g. clinical co-variates)
-    feature_selection : bool — whether to run AUC-based feature selection
-
-    Returns
-    -------
-    dict with keys:
-        y, oof, fold_fprs, fold_tprs, fold_aucs,
-        mean_auc, std_auc, optimal_threshold
-        feature_info (only if save_features=True): list of per-fold dicts
-    """
+    """Run leak-free 5-fold grouped CV."""
     cfg = cfg or Config
     top_k = top_k or cfg.TOP_K_FEATURES
 
@@ -125,7 +143,6 @@ def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
         Xtr, Xte = X.iloc[tr], X.iloc[te]
         ytr, yte = y.iloc[tr], y.iloc[te]
 
-        # Feature selection (train only) or use all columns
         if feature_selection:
             top_feat = _auc_feature_selection(Xtr, ytr, top_k=top_k)
             Xtr_fit = Xtr[top_feat]
@@ -135,17 +152,14 @@ def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
             Xtr_fit = Xtr
             Xte_fit = Xte
 
-        # Concatenate extra columns if provided
         if X_extra is not None:
             Xtr_extra, Xte_extra = X_extra.iloc[tr], X_extra.iloc[te]
             Xtr_fit = pd.concat([Xtr_fit, Xtr_extra], axis=1)
             Xte_fit = pd.concat([Xte_fit, Xte_extra], axis=1)
 
-        # Per-fold median imputation — train-fold medians applied to both
-        # train and test, so no test-fold information leaks into imputation.
+        # Per-fold median imputation avoids test-fold leakage.
         Xtr_fit, Xte_fit = _impute_train_fold(Xtr_fit, Xte_fit)
 
-        # Train + predict
         model = model_factory()
         model.fit(Xtr_fit, ytr)
         proba = model.predict_proba(Xte_fit)[:, 1]
@@ -157,7 +171,6 @@ def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
         fold_tprs.append(tpr)
         fold_aucs.append(fauc)
 
-        # Capture feature-level info
         if save_features:
             estimator = (model.named_steps["model"]
                          if hasattr(model, "named_steps") else model)
@@ -184,25 +197,18 @@ def run_cv(X, y, groups, model_factory, cfg=None, top_k=None,
         result["feature_info"] = feature_info
     return result
 
-
-# Backwards-compatible aliases
 def run_cv_no_fs(X, y, groups, model_factory, cfg=None):
     """Run CV without feature selection (for low-dimensional inputs like clinical co-variates)."""
     return run_cv(X, y, groups, model_factory, cfg=cfg, feature_selection=False)
-
 
 def run_cv_combined(X_expr, X_conf, y, groups, model_factory, cfg=None, top_k=None):
     """Run CV with AUC FS on expression, always including clinical co-variates."""
     return run_cv(X_expr, y, groups, model_factory, cfg=cfg, top_k=top_k,
                   X_extra=X_conf)
 
-
 def run_tissue_models(tissue, cat_list, df_meta_url, blood_subjid, X_wb,
                       model_factory, cfg=None, save_features=False):
-    """Run CV for all categories of a single tissue.
-
-    Designed to be called inside joblib.Parallel — one call per tissue.
-    """
+    """Run CV for all categories of a single tissue (one call per tissue inside joblib.Parallel)."""
     from gtex_biomarkers.labels import assign_donor_labels
 
     cfg = cfg or Config
@@ -230,14 +236,136 @@ def run_tissue_models(tissue, cat_list, df_meta_url, blood_subjid, X_wb,
 
     return results
 
+def run_cv_with_pca(X, y, groups, n_pcs=800, top_k_pcs=100, X_conf_sub=None,
+                    cfg=None, tag="", model_factory=None,
+                    X_covar=None, ortho_thresholds=None):
+    """Leak-free CV with per-fold PCA, optionally sweeping covariate-orthogonalization thresholds."""
+    cfg = cfg or Config
+    if model_factory is None:
+        model_factory = make_rf_model
+
+    sweep_mode = ortho_thresholds is not None and len(ortho_thresholds) > 0
+    if sweep_mode and X_covar is None:
+        raise ValueError("X_covar is required when ortho_thresholds is set.")
+
+    cv = StratifiedGroupKFold(
+        n_splits=cfg.N_SPLITS, shuffle=True, random_state=cfg.SEED
+    )
+
+    if sweep_mode:
+        per_thresh = {t: {"oof": np.full(len(y), np.nan), "fold_aucs": []}
+                      for t in ortho_thresholds}
+        dropped_records = []
+    else:
+        oof_legacy = np.full(len(y), np.nan)
+        fold_aucs_legacy = []
+
+    for fold, (tr, te) in enumerate(cv.split(X, y, groups=groups), 1):
+        Xtr, Xte = X.iloc[tr], X.iloc[te]
+        ytr, yte = y.iloc[tr], y.iloc[te]
+
+        scaler = StandardScaler()
+        Xtr_scaled = scaler.fit_transform(Xtr)
+        Xte_scaled = scaler.transform(Xte)
+
+        n_comp = min(n_pcs, Xtr_scaled.shape[0] - 1, Xtr_scaled.shape[1])
+        pca = PCA(n_components=n_comp, random_state=cfg.SEED)
+        Xtr_pcs_arr = pca.fit_transform(Xtr_scaled)
+        Xte_pcs_arr = pca.transform(Xte_scaled)
+
+        pc_cols = [f"PC{i+1}" for i in range(n_comp)]
+        Xtr_pcs = pd.DataFrame(Xtr_pcs_arr, columns=pc_cols, index=Xtr.index)
+        Xte_pcs = pd.DataFrame(Xte_pcs_arr, columns=pc_cols, index=Xte.index)
+
+        # Threshold-independent — compute once per fold.
+        if sweep_mode:
+            X_covar_tr = X_covar.iloc[tr]
+            pc_aucs = _compute_pc_covariate_aucs(Xtr_pcs, X_covar_tr)
+
+        thresholds_iter = ortho_thresholds if sweep_mode else [None]
+        for thresh in thresholds_iter:
+            if sweep_mode:
+                keep_mask = _drop_covariate_aligned_pcs(pc_aucs, thresh)
+                surviving = pc_aucs.index[keep_mask].tolist()
+                if len(surviving) < top_k_pcs:
+                    # Edge case: too many PCs dropped — fall through and use all survivors.
+                    pass
+                Xtr_pool = Xtr_pcs[surviving]
+                Xte_pool = Xte_pcs[surviving]
+                dropped_records.append({
+                    "fold": fold,
+                    "threshold": thresh,
+                    "n_dropped": int((~keep_mask).sum()),
+                    "n_kept": int(keep_mask.sum()),
+                    "tag": tag,
+                })
+            else:
+                Xtr_pool = Xtr_pcs
+                Xte_pool = Xte_pcs
+
+            top_pcs = _auc_feature_selection(
+                Xtr_pool, ytr,
+                top_k=min(top_k_pcs, Xtr_pool.shape[1])
+            )
+            Xtr_sel = Xtr_pool[top_pcs]
+            Xte_sel = Xte_pool[top_pcs]
+
+            if X_conf_sub is not None:
+                Xtr_sel = pd.concat([Xtr_sel, X_conf_sub.iloc[tr]], axis=1)
+                Xte_sel = pd.concat([Xte_sel, X_conf_sub.iloc[te]], axis=1)
+                Xtr_sel, Xte_sel = _impute_train_fold(Xtr_sel, Xte_sel)
+
+            model = model_factory()
+            model.fit(Xtr_sel, ytr)
+            proba = model.predict_proba(Xte_sel)[:, 1]
+
+            fauc = float(roc_auc_score(yte, proba))
+
+            if sweep_mode:
+                per_thresh[thresh]["oof"][te] = proba
+                per_thresh[thresh]["fold_aucs"].append(fauc)
+            else:
+                oof_legacy[te] = proba
+                fold_aucs_legacy.append(fauc)
+
+    if sweep_mode:
+        per_thresh_out = {}
+        for t, d in per_thresh.items():
+            arr = np.asarray(d["fold_aucs"])
+            per_thresh_out[t] = {
+                "mean_auc": float(arr.mean()),
+                "std_auc": float(arr.std()),
+                "fold_aucs": arr.tolist(),
+                "oof": d["oof"],
+            }
+        if tag:
+            line = f"    {tag} "
+            line += " ".join(
+                f"[t={t:.2f}: {per_thresh_out[t]['mean_auc']:.3f}±{per_thresh_out[t]['std_auc']:.3f}]"
+                for t in ortho_thresholds
+            )
+            print(line)
+        return {
+            "thresholds": list(ortho_thresholds),
+            "per_threshold": per_thresh_out,
+            "dropped_pcs": dropped_records,
+            "y": y,
+        }
+    else:
+        arr = np.asarray(fold_aucs_legacy)
+        if tag:
+            print(f"    {tag} Mean AUC = {arr.mean():.3f} +/- {arr.std():.3f}")
+        return {
+            "mean_auc": float(arr.mean()),
+            "std_auc": float(arr.std()),
+            "fold_aucs": arr.tolist(),
+            "oof": oof_legacy,
+            "y": y,
+        }
 
 def run_tissue_confounder_models(tissue, cat_list, df_meta_url, blood_subjid,
                                  X_wb, X_conf, model_factory, cfg=None):
-    """Run clinical co-variate-only AND expression+clinical co-variate models for one tissue.
-
-    Returns two lists: (conf_results, combined_results), each a list of
-    (tag, result_dict) tuples.
-    """
+    """Run clinical co-variate-only AND expression+clinical co-variate models for one tissue."""
     from gtex_biomarkers.labels import assign_donor_labels
 
     cfg = cfg or Config
@@ -259,14 +387,12 @@ def run_tissue_confounder_models(tissue, cat_list, df_meta_url, blood_subjid,
         if n_pos < cfg.MIN_POS_NEG_BLOOD or n_neg < cfg.MIN_POS_NEG_BLOOD:
             continue
 
-        # Model A: clinical co-variates only (no feature selection)
         res_c = run_cv(X_conf_cat, y_cat, g_cat, model_factory, cfg=cfg,
                        feature_selection=False)
         res_c["tissue"] = tissue
         res_c["category"] = cat
         conf_results.append((tag, res_c))
 
-        # Model B: expression + clinical co-variates (AUC FS on expression, clinical co-variates always kept)
         res_cb = run_cv(X_expr_cat, y_cat, g_cat, model_factory, cfg=cfg,
                         X_extra=X_conf_cat)
         res_cb["tissue"] = tissue

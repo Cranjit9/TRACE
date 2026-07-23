@@ -7,8 +7,6 @@ from collections import Counter
 
 from gtex_biomarkers.config import Config
 
-
-# ── Category pattern dictionary ───────────────────────────────────────────────
 CATEGORY_PATTERNS = {
     "steatosis":      r"steatosis|steatotic|macrovesicular\s+steat|microvesicular\s+steat",
     "congestion":     r"congest|congnest|sinusoidal dilat",
@@ -27,8 +25,6 @@ CATEGORY_PATTERNS = {
     "clean_specimens":  r"\bclean\b|no lesion|good specimens?|excellent specimens?",
 }
 
-
-# ── ConText-inspired negation detection ───────────────────────────────────────
 _CLAUSE_SPLIT = re.compile(r"[.;]")
 _SCOPE_TERM_SPLIT = re.compile(
     r"\b(?:and|but|however|yet|although|except|presenting|presents)\b"
@@ -54,7 +50,6 @@ COMPILED_PATTERNS = {
     for cat, pat in CATEGORY_PATTERNS.items()
 }
 
-
 def _is_negated_in_subclause(text, match_start):
     """Check if a match position is negated within its subclause."""
     subclauses = _SCOPE_TERM_SPLIT.split(text[:match_start + 20])
@@ -62,7 +57,6 @@ def _is_negated_in_subclause(text, match_start):
     if _POSITIVE_QUALIFIER.search(last_sub):
         return False
     return bool(_NEGATION_TRIGGER.search(last_sub))
-
 
 def _smart_comma_split(text):
     """Split text on commas but respect parenthetical expressions."""
@@ -82,19 +76,8 @@ def _smart_comma_split(text):
     parts.append("".join(current).strip())
     return [p for p in parts if p]
 
-
 def extract_categories(notes_text, compiled_patterns=None):
-    """Extract pathology categories from free-text notes using regex + negation.
-
-    Parameters
-    ----------
-    notes_text : str — pathology notes
-    compiled_patterns : dict — {category: compiled_regex}, built if None
-
-    Returns
-    -------
-    list of str — matched category names
-    """
+    """Extract pathology categories from free-text notes using regex + negation."""
     if compiled_patterns is None:
         compiled_patterns = COMPILED_PATTERNS
 
@@ -118,33 +101,19 @@ def extract_categories(notes_text, compiled_patterns=None):
 
     return sorted(matched)
 
-
 # Column with structured-or-NLP-imputed labels. Added to df_meta_url by
 # gtex_biomarkers.data.load_raw_data(). Falls back to the raw structured column
 # if the imputed column is absent (older cached data).
 _LABEL_COL = "Pathology.Categories.Final"
 _LABEL_COL_FALLBACK = "Pathology.Categories"
 
-
 def _pick_label_col(df):
     if _LABEL_COL in df.columns:
         return _LABEL_COL
     return _LABEL_COL_FALLBACK
 
-
 def assign_donor_labels(df_meta_url, tissue, category, blood_subjid):
-    """Assign binary donor-level labels for a tissue × category pair.
-
-    Reads from `Pathology.Categories.Final` (structured GTEx label when present,
-    NLP-imputed otherwise). Falls back to `Pathology.Categories` if the imputed
-    column is missing.
-
-    Returns
-    -------
-    y : Series — binary labels mapped to blood samples (NaN for unknown)
-    donor_lab : Series — donor SUBJID → 0/1
-    n_pos, n_neg : int — counts of positive/negative blood samples
-    """
+    """Assign binary donor-level labels for a tissue × category pair."""
     label_col = _pick_label_col(df_meta_url)
     tissue_sub = df_meta_url[df_meta_url["Tissue"] == tissue].copy()
     tissue_sub["SUBJID"] = (
@@ -166,17 +135,8 @@ def assign_donor_labels(df_meta_url, tissue, category, blood_subjid):
 
     return y, donor_lab, n_pos, n_neg
 
-
 def discover_tissue_category_pairs(df_meta_url, threshold=None):
-    """Find all tissue × category pairs with ≥ threshold positive samples.
-
-    Reads from `Pathology.Categories.Final` (imputed). Excludes normal labels
-    (clean_specimens, no_abnormalities).
-
-    Returns
-    -------
-    pairs_df : DataFrame — columns: tissue, category, n_samples
-    """
+    """Find all tissue × category pairs with ≥ threshold positive samples."""
     threshold = threshold or Config.ALL_TISSUE_THRESHOLD
     exclude = {x.lower() for x in Config.NORMAL_LABELS}
     label_col = _pick_label_col(df_meta_url)

@@ -15,9 +15,6 @@ from sklearn.metrics import (
 
 from gtex_biomarkers.config import Config
 
-
-# ── Single-model plots ────────────────────────────────────────────────────────
-
 def plot_roc_folds(results, title="", ax=None):
     """Plot per-fold ROC curves + mean on a single axis."""
     if ax is None:
@@ -47,9 +44,6 @@ def plot_roc_folds(results, title="", ax=None):
     ax.legend(fontsize=6, loc="lower right")
     return ax
 
-
-# ── Multi-model grid plots ───────────────────────────────────────────────────
-
 def _make_grid(results_dict, plot_fn, figsize_per_cell, suptitle="",
                save_path=None, ncols=4):
     """Shared grid layout: create subplots, call plot_fn per tag, hide empties."""
@@ -75,10 +69,8 @@ def _make_grid(results_dict, plot_fn, figsize_per_cell, suptitle="",
     plt.close(fig)
     return fig
 
-
 def _plot_roc_cell(res, tag, ax):
     plot_roc_folds(res, title=tag, ax=ax)
-
 
 def _plot_pr_cell(res, tag, ax):
     mask = ~np.isnan(res["oof"])
@@ -96,7 +88,6 @@ def _plot_pr_cell(res, tag, ax):
     ax.set_ylim(0, 1)
     ax.legend(fontsize=6, loc="upper right")
 
-
 def _plot_cm_cell(res, tag, ax):
     mask = ~np.isnan(res["oof"])
     thresh = res["optimal_threshold"]
@@ -105,7 +96,6 @@ def _plot_cm_cell(res, tag, ax):
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["No", "Yes"])
     disp.plot(ax=ax, values_format="d", colorbar=False)
     ax.set_title(f"{tag}\n(thresh = {thresh:.3f})", fontsize=8)
-
 
 def _plot_boxplot_cell(res, tag, ax):
     y_true = res["y"].values
@@ -119,28 +109,21 @@ def _plot_boxplot_cell(res, tag, ax):
     ax.set_ylabel("Ground truth")
     ax.set_title(tag, fontsize=9)
 
-
 def plot_roc_grid(results_dict, suptitle="", save_path=None, ncols=4):
     """ROC grid — one subplot per model."""
     return _make_grid(results_dict, _plot_roc_cell, (6, 5), suptitle, save_path, ncols)
-
 
 def plot_pr_grid(results_dict, suptitle="", save_path=None, ncols=4):
     """Precision-Recall grid — one subplot per model."""
     return _make_grid(results_dict, _plot_pr_cell, (6, 5), suptitle, save_path, ncols)
 
-
 def plot_cm_grid(results_dict, suptitle="", save_path=None, ncols=4):
     """Confusion matrix grid at Youden's J threshold."""
     return _make_grid(results_dict, _plot_cm_cell, (5, 4.5), suptitle, save_path, ncols)
 
-
 def plot_boxplot_grid(results_dict, suptitle="", save_path=None, ncols=4):
     """Box plots of predicted probability by ground-truth label."""
     return _make_grid(results_dict, _plot_boxplot_cell, (7, 4), suptitle, save_path, ncols)
-
-
-# ── Summary / comparison plots ────────────────────────────────────────────────
 
 def plot_ranked_barplot(summary_df, auc_cutoff=None, save_path=None):
     """Horizontal bar chart ranking all models by mean AUC."""
@@ -165,7 +148,6 @@ def plot_ranked_barplot(summary_df, auc_cutoff=None, save_path=None):
         fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
     return fig
-
 
 def plot_auc_heatmap(summary_df, save_path=None):
     """Heatmap of AUC: tissue (rows) × category (columns)."""
@@ -195,7 +177,6 @@ def plot_auc_heatmap(summary_df, save_path=None):
     plt.close(fig)
     return fig
 
-
 def plot_roc_overlay(results_dict, tags, title="", save_path=None):
     """Overlay ROC curves for selected models on one plot."""
     fig, ax = plt.subplots(figsize=(8, 7))
@@ -218,7 +199,6 @@ def plot_roc_overlay(results_dict, tags, title="", save_path=None):
         fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
     return fig
-
 
 def plot_comparison_scatter(comp_df, save_path=None):
     """Scatter plot: LR AUC (x) vs RF AUC (y) per model."""
@@ -248,21 +228,11 @@ def plot_comparison_scatter(comp_df, save_path=None):
     plt.close(fig)
     return fig
 
-
 def plot_paired_auc_bar(df, auc_col_a, auc_col_b, label_a, label_b,
                         title="", save_path=None,
                         color_a="#C44E52", color_b="#4878A8",
                         sort_by=None):
-    """Paired horizontal bar chart comparing two AUC columns.
-
-    Parameters
-    ----------
-    df : DataFrame with 'tissue' and 'category' columns
-    auc_col_a, auc_col_b : column names for the two AUC values
-    label_a, label_b : legend labels
-    color_a, color_b : bar colors (defaults: coral for signal, steel-blue for baseline)
-    sort_by : column to sort by (default: auc_col_a)
-    """
+    """Paired horizontal bar chart comparing two AUC columns."""
     s = df.copy()
     s["label"] = s["tissue"] + " | " + s["category"]
     s = s.sort_values(sort_by or auc_col_a, ascending=True).reset_index(drop=True)
@@ -284,17 +254,9 @@ def plot_paired_auc_bar(df, auc_col_a, auc_col_b, label_a, label_b,
         fig.savefig(save_path, bbox_inches="tight")
     plt.show()
 
-
 def plot_delta_bar(df, delta_col, title="", xlabel="", save_path=None,
                    color="#4878A8"):
-    """Horizontal bar chart of a delta (difference) column.
-
-    Parameters
-    ----------
-    df : DataFrame with 'tissue' and 'category' columns
-    delta_col : column name for the delta values
-    color : bar color (default: steel blue)
-    """
+    """Horizontal bar chart of a delta (difference) column."""
     s = df.copy()
     s["label"] = s["tissue"] + " | " + s["category"]
     s = s.sort_values(delta_col, ascending=True).reset_index(drop=True)
@@ -310,7 +272,6 @@ def plot_delta_bar(df, delta_col, title="", xlabel="", save_path=None,
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
     plt.show()
-
 
 def plot_comparison_barplot(comp_df, save_path=None):
     """Horizontal bar chart of AUC difference (RF - LR) per model."""
