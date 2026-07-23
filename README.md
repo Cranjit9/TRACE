@@ -1,4 +1,4 @@
-# Blood2Organ
+# TRACE
 
 Whole-blood gene expression as a non-invasive proxy for organ-specific tissue pathology. Reproduces the analyses and figures for the manuscript.
 
