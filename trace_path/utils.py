@@ -1,0 +1,104 @@
+"""General utility functions."""
+
+import pandas as pd
+import numpy as np
+from joblib import Parallel, delayed
+
+from trace_path.config import Config
+from trace_path.models import run_tissue_models, run_tissue_confounder_models
+
+def run_all_tissue_models_parallel(pairs_df, df_meta_url, blood_subjid, X_wb,
+                                   model_factory, cfg=None, n_jobs=-1,
+                                   save_features=False):
+    """Run CV models for all tissue × category pairs, parallelized by tissue."""
+    cfg = cfg or Config
+
+    tissue_groups = {}
+    for _, row in pairs_df.iterrows():
+        tissue_groups.setdefault(row["tissue"], []).append(
+            (row["category"], row["n_samples"])
+        )
+
+    parallel_out = Parallel(n_jobs=n_jobs, verbose=10)(
+        delayed(run_tissue_models)(
+            tissue, cat_list, df_meta_url, blood_subjid, X_wb,
+            model_factory, cfg=cfg, save_features=save_features
+        )
+        for tissue, cat_list in sorted(tissue_groups.items())
+    )
+
+    results_dict = {}
+    for tissue_results in parallel_out:
+        for tag, res in tissue_results:
+            results_dict[tag] = res
+
+    return results_dict, _make_summary(results_dict)
+
+def _make_summary(results_dict):
+    """Build a summary DataFrame from a results dict."""
+    rows = [
+        {"tissue": r["tissue"], "category": r["category"],
+         "mean_auc": r["mean_auc"], "std_auc": r["std_auc"],
+         "optimal_threshold": r["optimal_threshold"]}
+        for r in results_dict.values()
+    ]
+    return pd.DataFrame(rows).sort_values("mean_auc", ascending=False)
+
+def run_all_confounder_models_parallel(pairs_df, df_meta_url, blood_subjid,
+                                       X_wb, X_conf, model_factory,
+                                       cfg=None, n_jobs=-1):
+    """Run clinical co-variate-only AND expression+clinical co-variate RF models, parallelized by tissue."""
+    cfg = cfg or Config
+
+    tissue_groups = {}
+    for _, row in pairs_df.iterrows():
+        tissue_groups.setdefault(row["tissue"], []).append(
+            (row["category"], row["n_samples"])
+        )
+
+    parallel_out = Parallel(n_jobs=n_jobs, verbose=10)(
+        delayed(run_tissue_confounder_models)(
+            tissue, cat_list, df_meta_url, blood_subjid, X_wb, X_conf,
+            model_factory, cfg=cfg
+        )
+        for tissue, cat_list in sorted(tissue_groups.items())
+    )
+
+    conf_results, comb_results = {}, {}
+    for tissue_conf, tissue_comb in parallel_out:
+        for tag, res in tissue_conf:
+            conf_results[tag] = res
+        for tag, res in tissue_comb:
+            comb_results[tag] = res
+
+    return (conf_results, _make_summary(conf_results),
+            comb_results, _make_summary(comb_results))
+
+def build_comparison_table(lr_summary, rf_summary):
+    """Merge LR and RF summaries into a comparison table."""
+    comp = lr_summary.merge(
+        rf_summary, on=["tissue", "category"], suffixes=("_lr", "_rf"), how="outer"
+    )
+    comp["auc_diff"] = comp["mean_auc_rf"] - comp["mean_auc_lr"]
+    comp = comp.sort_values("auc_diff", ascending=False)
+    return comp
+
+def top_models_table(summary_df, results_dict, auc_cutoff=None):
+    """Filter to models above AUC cutoff and add sample counts."""
+    auc_cutoff = auc_cutoff or Config.AUC_THRESH
+    top = summary_df[summary_df["mean_auc"] >= auc_cutoff].copy()
+    top = top.sort_values("mean_auc", ascending=False).reset_index(drop=True)
+
+    for idx, row in top.iterrows():
+        tag = f"{row['tissue']} | {row['category']}"
+        if tag in results_dict:
+            res = results_dict[tag]
+            top.loc[idx, "n_blood_samples"] = len(res["y"])
+            top.loc[idx, "n_positive"] = int(res["y"].sum())
+            top.loc[idx, "prevalence"] = res["y"].mean()
+
+    if "n_blood_samples" in top.columns:
+        top["n_blood_samples"] = top["n_blood_samples"].astype(int)
+        top["n_positive"] = top["n_positive"].astype(int)
+
+    return top

@@ -53,12 +53,12 @@ Required only for the external whole-blood validation of the liver-cirrhosis sig
 | 16 | Main manuscript figures 1–4 |
 | 17 | Supplementary figures S1–S6 |
 
-Parameters and thresholds are consolidated in `gtex_biomarkers/config.py`.
+Parameters and thresholds are consolidated in `trace_path/config.py`.
 
 ## Layout
 
 ```
-gtex_biomarkers/  # config, data, models, evaluation, figure builders
+trace_path/  # config, data, models, evaluation, figure builders
 notebooks/        # NB01-NB17
 scripts/          # pipeline runner + figure composer
 manuscript/       # local drafts (gitignored)
