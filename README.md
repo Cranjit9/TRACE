@@ -7,8 +7,8 @@ TRACE (Transcriptomic Reading of Affected organs and Causal Evaluation) is a con
 Python 3.12.8, pinned via `requirements-lock.txt`.
 
 ```bash
-git clone https://github.com/Cranjit9/gtex_gene_expression.git
-cd gtex_gene_expression
+git clone https://github.com/Cranjit9/TRACE.git
+cd TRACE
 python3.12 -m venv .venv
 .venv/bin/pip install --upgrade pip wheel setuptools
 .venv/bin/pip install -r requirements-lock.txt

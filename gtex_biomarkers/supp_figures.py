@@ -736,8 +736,6 @@ def build_S4():
     import matplotlib.pyplot as plt
     from itertools import combinations
 
-    PROJ = "/Users/rsinha/Library/CloudStorage/OneDrive-SanfordBurnhamPrebysMedicalDiscoveryInstitute/Desktop/gtex_gene_expression"
-
     QUALIFYING = [
         ("Liver", "cirrhosis", CORAL),
         ("Small Intestine - Terminal Ileum", "nodularity", SAGE),
