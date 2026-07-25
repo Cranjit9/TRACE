@@ -26,6 +26,16 @@ Place the following GTEx v10 files in `data/raw/`:
 | `Gtex_restricted.txt` | dbGaP restricted access |
 | `meta_data_with_url.csv` | GTEx Portal |
 
+### External validation cohort (`data/external/`)
+
+Required only for the external whole-blood validation of the liver-cirrhosis signature (NB15 §15.16 → Fig 4E). Skip if not reproducing that panel.
+
+| File | Source |
+|---|---|
+| `GSE142255/GSE142255_expression.csv.gz` | GEO series GSE142255 (Weiss et al. 2021, *Front Immunol*), probe-level log2 intensities |
+| `GSE142255/GSE142255_metadata.csv` | GEO series GSE142255 sample annotations |
+| `GPL17586_probe_to_gene.csv` | GEO platform GPL17586 (Affymetrix HTA-2.0), two columns: `probe_id`, `gene_symbol` |
+
 ## Run
 
 ```bash
